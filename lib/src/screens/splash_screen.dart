@@ -101,7 +101,7 @@ class _SplashScreenState extends State<SplashScreen>
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
             colors: [
-              Color(0xFF1e3a8a), // Deep blue
+              Color(0xff686c75), // Deep blue
               Color(0xFF0f172a), // Very dark blue/black
             ],
           ),
@@ -156,70 +156,70 @@ class _SplashScreenState extends State<SplashScreen>
               ),
 
               // Bottom section with loading
-              Padding(
-                padding: const EdgeInsets.only(bottom: 60),
-                child: Column(
-                  children: [
-                    // Loading text
-                    FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: const Text(
-                        'Checking login state...',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.white60,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-
-                    // Progress bar
-                    AnimatedBuilder(
-                      animation: _progressAnimation,
-                      builder: (context, child) {
-                        return Container(
-                          width: MediaQuery.of(context).size.width * 0.7,
-                          height: 3,
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.2),
-                            borderRadius: BorderRadius.circular(1.5),
-                          ),
-                          child: FractionallySizedBox(
-                            alignment: Alignment.centerLeft,
-                            widthFactor: _progressAnimation.value,
-                            child: Container(
-                              decoration: BoxDecoration(
-                                color: const Color(0xFF3b82f6),
-                                borderRadius: BorderRadius.circular(1.5),
-                                boxShadow: [
-                                  BoxShadow(
-                                    color: const Color(0xFF3b82f6).withOpacity(0.5),
-                                    blurRadius: 4,
-                                    offset: const Offset(0, 0),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-                    const SizedBox(height: 30),
-
-                    // Version
-                    FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: const Text(
-                        'Version 1.0.0',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Colors.white,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              // Padding(
+              //   padding: const EdgeInsets.only(bottom: 60),
+              //   child: Column(
+              //     children: [
+              //       // Loading text
+              //       FadeTransition(
+              //         opacity: _fadeAnimation,
+              //         child: const Text(
+              //           'Checking login state...',
+              //           style: TextStyle(
+              //             fontSize: 14,
+              //             color: Colors.white60,
+              //           ),
+              //         ),
+              //       ),
+              //       const SizedBox(height: 20),
+              //
+              //       // Progress bar
+              //       AnimatedBuilder(
+              //         animation: _progressAnimation,
+              //         builder: (context, child) {
+              //           return Container(
+              //             width: MediaQuery.of(context).size.width * 0.7,
+              //             height: 3,
+              //             decoration: BoxDecoration(
+              //               color: Colors.white.withOpacity(0.2),
+              //               borderRadius: BorderRadius.circular(1.5),
+              //             ),
+              //             child: FractionallySizedBox(
+              //               alignment: Alignment.centerLeft,
+              //               widthFactor: _progressAnimation.value,
+              //               child: Container(
+              //                 decoration: BoxDecoration(
+              //                   color: const Color(0xff686c75),
+              //                   borderRadius: BorderRadius.circular(1.5),
+              //                   boxShadow: [
+              //                     BoxShadow(
+              //                       color: const Color(0xff686c75).withOpacity(0.5),
+              //                       blurRadius: 4,
+              //                       offset: const Offset(0, 0),
+              //                     ),
+              //                   ],
+              //                 ),
+              //               ),
+              //             ),
+              //           );
+              //         },
+              //       ),
+              //       const SizedBox(height: 30),
+              //
+              //       // Version
+              //       FadeTransition(
+              //         opacity: _fadeAnimation,
+              //         child: const Text(
+              //           'Version 1.0.0',
+              //           style: TextStyle(
+              //             fontSize: 12,
+              //             color: Colors.white,
+              //           ),
+              //         ),
+              //       ),
+              //     ],
+              //   ),
+              // ),
             ],
           ),
         ),
@@ -247,7 +247,7 @@ class SliderIconPainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
     final paint = Paint()
-      ..color = const Color(0xFF3b82f6)
+      ..color = const Color(0xff686c75)
       ..strokeWidth = 3
       ..strokeCap = StrokeCap.round;
 
@@ -268,7 +268,7 @@ class SliderIconPainter extends CustomPainter {
       );
 
       // Draw slider handle
-      paint.color = const Color(0xFF3b82f6);
+      paint.color = const Color(0xff686c75);
       final handleX = center.dx + (i - 1) * sliderWidth * 0.2; // Vary handle positions
       canvas.drawCircle(Offset(handleX, y), 6, paint);
     }

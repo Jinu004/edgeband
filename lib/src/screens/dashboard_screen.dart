@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:jv/src/screens/sales_screen.dart';
+import 'package:jv/src/screens/settings%20screen.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:path_provider/path_provider.dart';
@@ -128,7 +129,15 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
-      appBar: AppBar(
+      appBar: AppBar(actions: [
+        IconButton(onPressed: (){
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (context) => const SettingsScreen()),
+          );
+
+        }, icon: Icon(Icons.settings))
+      ],
         elevation: 0,
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
@@ -543,7 +552,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(
-                    'View All History',
+                    'Sales History',
                     style: TextStyle(
                       color: Colors.blue[600],
                       fontWeight: FontWeight.w600,
