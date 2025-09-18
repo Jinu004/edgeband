@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:jv/src/screens/sales_screen.dart';
 import 'package:provider/provider.dart';
 import 'src/providers/auth_provider.dart';
 import 'src/providers/machine_provider.dart';
@@ -26,6 +27,8 @@ class MyApp extends StatelessWidget {
           '/dashboard': (_) => const DashboardScreen(),
           '/device-setup': (_) => const DeviceSetupScreen(),
           '/history': (_) => const HistoryScreen(),
+          '/sales': (_) => const SalesScreen(),
+
         },
       ),
     );
