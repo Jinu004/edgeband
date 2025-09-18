@@ -1,87 +1,97 @@
+import 'dart:convert';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 class BleProvisionService {
+  // ESP32 UUIDs (replace with yours)
+  static const String serviceUUID = "12345678-1234-1234-1234-123456789abc";
+  static const String wifiCharUUID = "87654321-4321-4321-4321-cba987654321";
+  static const String statusCharUUID = "11223344-5566-7788-9900-aabbccddeeff";
+  static const String resetCharUUID = "99887766-5544-3322-1100-ffeeddccbbaa";
 
-  // Replace these UUIDs with your ESP32’s values
-  static const String serviceUuid = "12345678-1234-5678-1234-56789abcdef0";
-  static const String scanCharUuid = "abc1";
-  static const String credCharUuid = "abc2";
-  static const String statusCharUuid = "abc3";
-
-  final List<ScanResult> found = [];
   BluetoothDevice? _connectedDevice;
-  BluetoothCharacteristic? _scanChar;
-  BluetoothCharacteristic? _credChar;
-  BluetoothCharacteristic? _statusChar;
+  BluetoothCharacteristic? _wifiCharacteristic;
+  BluetoothCharacteristic? _statusCharacteristic;
+  BluetoothCharacteristic? _resetCharacteristic;
 
-  /// Start scanning for devices
-  Future<void> startScan() async {
-    found.clear();
-    FlutterBluePlus.startScan(timeout: const Duration(seconds: 5));
+  final List<BluetoothDevice> devicesList = [];
+  bool isConnected = false;
 
-    await for (final results in FlutterBluePlus.scanResults) {
+  /// Scan for devices advertising as ESP32
+  Future<List<BluetoothDevice>> scanForDevices({String expectedName = "ESP32-WiFi-Setup"}) async {
+    devicesList.clear();
+    await FlutterBluePlus.startScan(timeout: const Duration(seconds: 8));
+
+    FlutterBluePlus.scanResults.listen((results) {
       for (var r in results) {
-        if (!found.any((d) => d.device.remoteId == r.device.remoteId)) {
-          found.add(r);
+        if (r.device.name == expectedName && !devicesList.contains(r.device)) {
+          devicesList.add(r.device);
         }
       }
-    }
-  }
+    });
 
-  /// Stop scanning
-  Future<void> stopScan() async {
+    await Future.delayed(const Duration(seconds: 8));
     await FlutterBluePlus.stopScan();
+    return devicesList;
   }
 
-  /// Connect to selected device
-  Future<void> connectToDevice(BluetoothDevice device) async {
+  /// Connect to a specific device
+  Future<void> connectToDevice(BluetoothDevice device, void Function(String) onStatusUpdate) async {
     _connectedDevice = device;
-    await device.connect(autoConnect: false);
+    await device.connect();
+    isConnected = true;
 
     List<BluetoothService> services = await device.discoverServices();
-    for (var s in services) {
-      if (s.uuid.toString() == serviceUuid) {
-        for (var c in s.characteristics) {
-          if (c.uuid.toString().endsWith(scanCharUuid)) {
-            _scanChar = c;
+    for (BluetoothService service in services) {
+      if (service.uuid.toString().toLowerCase() == serviceUUID.toLowerCase()) {
+        for (BluetoothCharacteristic c in service.characteristics) {
+          if (c.uuid.toString().toLowerCase() == wifiCharUUID.toLowerCase()) {
+            _wifiCharacteristic = c;
           }
-          if (c.uuid.toString().endsWith(credCharUuid)) {
-            _credChar = c;
+          if (c.uuid.toString().toLowerCase() == resetCharUUID.toLowerCase()) {
+            _resetCharacteristic = c;
           }
-          if (c.uuid.toString().endsWith(statusCharUuid)) {
-            _statusChar = c;
+          if (c.uuid.toString().toLowerCase() == statusCharUUID.toLowerCase()) {
+            _statusCharacteristic = c;
+
+            // Subscribe to notifications
+            await c.setNotifyValue(true);
+            c.value.listen((value) {
+              final response = utf8.decode(value);
+              onStatusUpdate(response); // pass to UI
+            });
           }
         }
       }
     }
 
-    if (_scanChar == null || _credChar == null || _statusChar == null) {
-      throw Exception("Device missing expected characteristics");
+    if (_wifiCharacteristic == null || _statusCharacteristic == null) {
+      throw Exception("ESP32 missing expected characteristics");
     }
   }
 
-  /// Provision Wi-Fi credentials
-  Future<void> provisionWifi(String ssid, String password) async {
-    if (_credChar == null || _statusChar == null) {
-      throw Exception("Not connected to device");
+  /// Send Wi-Fi credentials as JSON
+  Future<void> sendWifiCredentials(String ssid, String password) async {
+    if (_wifiCharacteristic == null) {
+      throw Exception("Not connected to ESP32");
     }
 
-    final creds = "$ssid|$password";
-    await _credChar!.write(creds.codeUnits, withoutResponse: true);
+    final creds = {"ssid": ssid, "password": password};
+    final jsonString = json.encode(creds);
+    await _wifiCharacteristic!.write(utf8.encode(jsonString));
+  }
 
-    // Optional: wait and check status
-    await Future.delayed(const Duration(seconds: 3));
-    final statusData = await _statusChar!.read();
-    final status = String.fromCharCodes(statusData);
-
-    if (status.toLowerCase().contains("fail")) {
-      throw Exception("Wi-Fi connection failed");
+  /// Clear saved credentials on ESP32
+  Future<void> resetWifiCredentials() async {
+    if (_resetCharacteristic == null) {
+      throw Exception("Not connected to ESP32");
     }
+    await _resetCharacteristic!.write([1]); // trigger reset
   }
 
   /// Disconnect
   Future<void> disconnect() async {
     await _connectedDevice?.disconnect();
     _connectedDevice = null;
+    isConnected = false;
   }
 }
