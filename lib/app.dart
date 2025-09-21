@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:jv/src/screens/cutting_log_screen.dart';
 import 'package:provider/provider.dart';
 import 'src/providers/auth_provider.dart';
 import 'src/providers/machine_provider.dart';
@@ -24,8 +25,10 @@ class MyApp extends StatelessWidget {
         routes: {
           '/login': (_) => const LoginScreen(),
           '/dashboard': (_) => const DashboardScreen(),
-          '/device-setup': (_) => const DeviceSetupScreen(),
+          '/device-setup': (_) => const BluetoothScanScreen(),
           '/history': (_) => const HistoryScreen(),
+          '/sales': (_) => const CuttingLogsScreen (),
+
         },
       ),
     );
