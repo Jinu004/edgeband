@@ -1,31 +1,25 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_blue_plus/flutter_blue_plus.dart';
+import 'package:jv/src/screens/wifi_screen.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../services/ble_provision_service.dart';
 
-class DeviceSetupScreen extends StatefulWidget {
-  const DeviceSetupScreen({super.key});
+class BluetoothScanScreen extends StatefulWidget {
+  const BluetoothScanScreen({super.key});
 
   @override
-  State<DeviceSetupScreen> createState() => _DeviceSetupScreenState();
+  State<BluetoothScanScreen> createState() => _BluetoothScanScreenState();
 }
 
-class _DeviceSetupScreenState extends State<DeviceSetupScreen>
+class _BluetoothScanScreenState extends State<BluetoothScanScreen>
     with TickerProviderStateMixin {
   final BleProvisionService bleService = BleProvisionService();
 
   List<BluetoothDevice> devices = [];
   BluetoothDevice? selectedDevice;
-
   String connectionStatus = "Not Connected";
-  String ssid = "";
-  String password = "";
-
-  final ssidController = TextEditingController();
-  final passwordController = TextEditingController();
-  final _formKey = GlobalKey<FormState>();
-
   bool scanning = false;
-  bool _obscurePassword = true;
+  bool connecting = false;
 
   late AnimationController _fadeController;
   late AnimationController _pulseController;
@@ -62,6 +56,12 @@ class _DeviceSetupScreenState extends State<DeviceSetupScreen>
     ));
 
     _fadeController.forward();
+    _checkPermissions();
+  }
+
+  /// Check and request necessary permissions
+  Future<void> _checkPermissions() async {
+    await Permission.location.request();
   }
 
   /// Scan for ESP32 devices
@@ -85,6 +85,7 @@ class _DeviceSetupScreenState extends State<DeviceSetupScreen>
   /// Connect to selected ESP32
   Future<void> connectToDevice(BluetoothDevice device) async {
     setState(() {
+      connecting = true;
       connectionStatus = "Connecting...";
     });
 
@@ -98,66 +99,56 @@ class _DeviceSetupScreenState extends State<DeviceSetupScreen>
       setState(() {
         selectedDevice = device;
         connectionStatus = "Connected to ${device.name}";
+        connecting = false;
       });
+
+      // Show success message and navigate to WiFi setup after a short delay
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Successfully connected to ${device.name}'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+
+      // Navigate to WiFi setup screen after connection
+      await Future.delayed(const Duration(seconds: 1));
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => WiFiSetupScreen(
+              connectedDevice: device,
+              bleService: bleService,
+            ),
+          ),
+        );
+      }
     } catch (e) {
       setState(() {
         connectionStatus = "Connection failed: $e";
-      });
-    }
-  }
-
-  /// Send Wi-Fi credentials to ESP32
-  Future<void> provisionWifi() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    ssid = ssidController.text.trim();
-    password = passwordController.text.trim();
-
-    try {
-      await bleService.sendWifiCredentials(ssid, password);
-      setState(() {
-        connectionStatus = "Credentials sent, waiting for ESP32...";
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Wi-Fi credentials sent successfully!'),
-          backgroundColor: Colors.green,
-        ),
-      );
-    } catch (e) {
-      setState(() {
-        connectionStatus = "Failed to send credentials: $e";
+        connecting = false;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Failed to send credentials: $e'),
+          content: Text('Connection failed: $e'),
           backgroundColor: Colors.red,
         ),
       );
     }
   }
 
-  /// Disconnect
-  Future<void> disconnect() async {
-    await bleService.disconnect();
-    setState(() {
-      selectedDevice = null;
-      connectionStatus = "Disconnected";
-    });
-  }
-
   Color _getStatusColor() {
     if (connectionStatus.contains("Connected")) return Colors.green;
-    if (connectionStatus.contains("Connecting") || connectionStatus.contains("Scanning")) return Colors.orange;
+    if (connectionStatus.contains("Connecting")) return Colors.orange;
     if (connectionStatus.contains("failed") || connectionStatus.contains("Failed")) return Colors.red;
     return Colors.grey;
   }
 
   IconData _getStatusIcon() {
     if (connectionStatus.contains("Connected")) return Icons.check_circle;
-    if (connectionStatus.contains("Connecting") || connectionStatus.contains("Scanning")) return Icons.sync;
+    if (connectionStatus.contains("Connecting")) return Icons.sync;
     if (connectionStatus.contains("failed") || connectionStatus.contains("Failed")) return Icons.error;
     return Icons.bluetooth;
   }
@@ -166,9 +157,6 @@ class _DeviceSetupScreenState extends State<DeviceSetupScreen>
   void dispose() {
     _fadeController.dispose();
     _pulseController.dispose();
-    ssidController.dispose();
-    passwordController.dispose();
-    bleService.disconnect();
     super.dispose();
   }
 
@@ -206,7 +194,7 @@ class _DeviceSetupScreenState extends State<DeviceSetupScreen>
                     const SizedBox(width: 8),
                     const Expanded(
                       child: Text(
-                        'Machine  Setup',
+                        'Machine Setup - Step 1',
                         style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
@@ -221,8 +209,60 @@ class _DeviceSetupScreenState extends State<DeviceSetupScreen>
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: const Icon(
-                        Icons.wifi,
+                        Icons.bluetooth,
                         color: Color(0xFF3b82f6),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // Progress indicator
+            FadeTransition(
+              opacity: _fadeAnimation,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF3b82f6),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Center(
+                        child: Text(
+                          '1',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Container(
+                        height: 2,
+                        color: Colors.grey.withOpacity(0.3),
+                      ),
+                    ),
+                    Container(
+                      width: 32,
+                      height: 32,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.withOpacity(0.3),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Center(
+                        child: Text(
+                          '2',
+                          style: TextStyle(
+                            color: Colors.grey,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
                       ),
                     ),
                   ],
@@ -236,6 +276,51 @@ class _DeviceSetupScreenState extends State<DeviceSetupScreen>
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   children: [
+                    // Instruction card
+                    FadeTransition(
+                      opacity: _fadeAnimation,
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(20),
+                        margin: const EdgeInsets.only(bottom: 20),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF3b82f6).withOpacity(0.05),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                            color: const Color(0xFF3b82f6).withOpacity(0.2),
+                            width: 1,
+                          ),
+                        ),
+                        child: Column(
+                          children: [
+                            Icon(
+                              Icons.info_outline,
+                              size: 32,
+                              color: const Color(0xFF3b82f6),
+                            ),
+                            const SizedBox(height: 12),
+                            const Text(
+                              'Connect to Device',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.black,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            const Text(
+                              'First, we need to connect to your ESP32 device via Bluetooth. Make sure your device is in pairing mode.',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey,
+                              ),
+                              textAlign: TextAlign.center,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
                     // Scan section
                     FadeTransition(
                       opacity: _fadeAnimation,
@@ -329,7 +414,7 @@ class _DeviceSetupScreenState extends State<DeviceSetupScreen>
                                   ),
                                   icon: const Icon(Icons.search),
                                   label: const Text(
-                                    'Scan for Device',
+                                    'Scan for Devices',
                                     style: TextStyle(fontWeight: FontWeight.w600),
                                   ),
                                 ),
@@ -419,6 +504,12 @@ class _DeviceSetupScreenState extends State<DeviceSetupScreen>
                                       ),
                                       trailing: isSelected
                                           ? const Icon(Icons.check_circle, color: Color(0xFF3b82f6))
+                                          : connecting
+                                          ? const SizedBox(
+                                        width: 20,
+                                        height: 20,
+                                        child: CircularProgressIndicator(strokeWidth: 2),
+                                      )
                                           : TextButton(
                                         onPressed: () => connectToDevice(device),
                                         style: TextButton.styleFrom(
@@ -439,207 +530,38 @@ class _DeviceSetupScreenState extends State<DeviceSetupScreen>
                     const SizedBox(height: 20),
 
                     // Status section
-                    FadeTransition(
-                      opacity: _fadeAnimation,
-                      child: Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: _getStatusColor().withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: _getStatusColor().withOpacity(0.3),
-                            width: 1,
-                          ),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              _getStatusIcon(),
-                              color: _getStatusColor(),
-                              size: 24,
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                connectionStatus,
-                                style: TextStyle(
-                                  color: _getStatusColor(),
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: 20),
-
-                    // Wi-Fi credentials form
-                    if (selectedDevice != null)
+                    if (connectionStatus != "Not Connected")
                       FadeTransition(
                         opacity: _fadeAnimation,
                         child: Container(
-                          padding: const EdgeInsets.all(20),
+                          width: double.infinity,
+                          padding: const EdgeInsets.all(16),
                           decoration: BoxDecoration(
-                            color: Colors.grey.withOpacity(0.05),
-                            borderRadius: BorderRadius.circular(16),
+                            color: _getStatusColor().withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(12),
                             border: Border.all(
-                              color: Colors.grey.withOpacity(0.2),
+                              color: _getStatusColor().withOpacity(0.3),
                               width: 1,
                             ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.grey.withOpacity(0.1),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                _getStatusIcon(),
+                                color: _getStatusColor(),
+                                size: 24,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  connectionStatus,
+                                  style: TextStyle(
+                                    color: _getStatusColor(),
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
                               ),
                             ],
-                          ),
-                          child: Form(
-                            key: _formKey,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                const Row(
-                                  children: [
-                                    Icon(
-                                      Icons.wifi,
-                                      color: Color(0xFF3b82f6),
-                                      size: 24,
-                                    ),
-                                    SizedBox(width: 8),
-                                    Text(
-                                      'Wi-Fi Configuration',
-                                      style: TextStyle(
-                                        fontSize: 18,
-                                        fontWeight: FontWeight.bold,
-                                        color: Colors.black,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 16),
-
-                                // SSID field
-                                TextFormField(
-                                  controller: ssidController,
-                                  style: const TextStyle(color: Colors.black),
-                                  decoration: InputDecoration(
-                                    labelText: 'Wi-Fi SSID',
-                                    labelStyle: const TextStyle(color: Colors.grey),
-                                    prefixIcon: const Icon(Icons.wifi, color: Colors.grey),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      borderSide: const BorderSide(color: Color(0xFF3b82f6), width: 2),
-                                    ),
-                                    filled: true,
-                                    fillColor: Colors.grey.withOpacity(0.05),
-                                  ),
-                                  validator: (value) {
-                                    if (value == null || value.trim().isEmpty) {
-                                      return 'Please enter Wi-Fi SSID';
-                                    }
-                                    return null;
-                                  },
-                                ),
-                                const SizedBox(height: 16),
-
-                                // Password field
-                                TextFormField(
-                                  controller: passwordController,
-                                  obscureText: _obscurePassword,
-                                  style: const TextStyle(color: Colors.black),
-                                  decoration: InputDecoration(
-                                    labelText: 'Wi-Fi Password',
-                                    labelStyle: const TextStyle(color: Colors.grey),
-                                    prefixIcon: const Icon(Icons.lock_outline, color: Colors.grey),
-                                    suffixIcon: IconButton(
-                                      icon: Icon(
-                                        _obscurePassword ? Icons.visibility_off : Icons.visibility,
-                                        color: Colors.grey,
-                                      ),
-                                      onPressed: () {
-                                        setState(() {
-                                          _obscurePassword = !_obscurePassword;
-                                        });
-                                      },
-                                    ),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(12),
-                                      borderSide: const BorderSide(color: Color(0xFF3b82f6), width: 2),
-                                    ),
-                                    filled: true,
-                                    fillColor: Colors.grey.withOpacity(0.05),
-                                  ),
-                                  validator: (value) {
-                                    if (value == null || value.trim().isEmpty) {
-                                      return 'Please enter Wi-Fi password';
-                                    }
-                                    return null;
-                                  },
-                                ),
-                                const SizedBox(height: 20),
-
-                                // Action buttons
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: OutlinedButton(
-                                        onPressed: disconnect,
-                                        style: OutlinedButton.styleFrom(
-                                          foregroundColor: Colors.grey,
-                                          side: BorderSide(color: Colors.grey.withOpacity(0.3)),
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(12),
-                                          ),
-                                          padding: const EdgeInsets.symmetric(vertical: 12),
-                                        ),
-                                        child: const Text('Disconnect'),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    Expanded(
-                                      flex: 2,
-                                      child: ElevatedButton.icon(
-                                        onPressed: provisionWifi,
-                                        style: ElevatedButton.styleFrom(
-                                          backgroundColor: const Color(0xFF3b82f6),
-                                          foregroundColor: Colors.white,
-                                          shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(12),
-                                          ),
-                                          padding: const EdgeInsets.symmetric(vertical: 12),
-                                          elevation: 4,
-                                        ),
-                                        icon: const Icon(Icons.send, size: 18),
-                                        label: const Text(
-                                          'Send Credentials',
-                                          style: TextStyle(fontWeight: FontWeight.w600),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
                           ),
                         ),
                       ),

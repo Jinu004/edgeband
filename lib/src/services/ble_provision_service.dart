@@ -3,10 +3,15 @@ import 'package:flutter_blue_plus/flutter_blue_plus.dart';
 
 class BleProvisionService {
   // ESP32 UUIDs (replace with yours)
-  static const String serviceUUID = "12345678-1234-1234-1234-123456789abc";
-  static const String wifiCharUUID = "87654321-4321-4321-4321-cba987654321";
-  static const String statusCharUUID = "11223344-5566-7788-9900-aabbccddeeff";
-  static const String resetCharUUID = "99887766-5544-3322-1100-ffeeddccbbaa";
+
+
+
+  // UUIDs matching ESP32 code
+  final String serviceUUID = "12345678-1234-1234-1234-123456789abc";
+  final String wifiCharUUID = "87654321-4321-4321-4321-cba987654321";
+  final String statusCharUUID = "11223344-5566-7788-9900-aabbccddeeff";
+  final String resetCharUUID = "99887766-5544-3322-1100-ffeeddccbbaa";
+
 
   BluetoothDevice? _connectedDevice;
   BluetoothCharacteristic? _wifiCharacteristic;
@@ -17,22 +22,32 @@ class BleProvisionService {
   bool isConnected = false;
 
   /// Scan for devices advertising as ESP32
-  Future<List<BluetoothDevice>> scanForDevices({String expectedName = "ESP32-WiFi-Setup"}) async {
+  Future<List<BluetoothDevice>> scanForDevices() async {
     devicesList.clear();
+
+    // Start scanning
     await FlutterBluePlus.startScan(timeout: const Duration(seconds: 8));
 
+    // Listen for scan results
     FlutterBluePlus.scanResults.listen((results) {
       for (var r in results) {
-        if (r.device.name == expectedName && !devicesList.contains(r.device)) {
+        // Add device if not already in list
+        if (!devicesList.contains(r.device)) {
           devicesList.add(r.device);
+          print("Found device: ${r.device.name} (${r.device.id})");
         }
       }
     });
 
+    // Wait for scan duration
     await Future.delayed(const Duration(seconds: 8));
+
+    // Stop scanning
     await FlutterBluePlus.stopScan();
+
     return devicesList;
   }
+
 
   /// Connect to a specific device
   Future<void> connectToDevice(BluetoothDevice device, void Function(String) onStatusUpdate) async {

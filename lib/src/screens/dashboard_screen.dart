@@ -1,6 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:jv/src/screens/sales_screen.dart';
+import 'package:jv/src/screens/cutting_log_screen.dart';
 import 'package:jv/src/screens/settings%20screen.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -51,6 +51,54 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         .collection('history')
         .orderBy('timestamp', descending: true)
         .snapshots();
+  }
+
+  // Get the latest cutting log for actual length
+  Stream<QuerySnapshot<Map<String, dynamic>>> cuttingLogsStream() {
+    return FirebaseFirestore.instance
+        .collection('cuttingLogs')
+        .orderBy('timestamp', descending: true)
+        .limit(1)
+        .snapshots();
+  }
+
+  // Get daily total from cutting logs
+  Future<Map<String, double>> getCuttingLogTotals() async {
+    try {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+
+      final snapshot = await FirebaseFirestore.instance
+          .collection('cuttingLogs')
+          .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(today))
+          .get();
+
+      double dailyTotal = 0;
+      double weeklyTotal = 0;
+
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final actualLength = (data['actualLength'] as num?)?.toDouble() ?? 0;
+        final timestamp = (data['timestamp'] as Timestamp).toDate();
+
+        // Daily total
+        if (timestamp.isAfter(today)) {
+          dailyTotal += actualLength;
+        }
+
+        // Weekly total (last 7 days)
+        if (timestamp.isAfter(now.subtract(const Duration(days: 7)))) {
+          weeklyTotal += actualLength;
+        }
+      }
+
+      return {
+        'daily': dailyTotal,
+        'weekly': weeklyTotal,
+      };
+    } catch (e) {
+      return {'daily': 0.0, 'weekly': 0.0};
+    }
   }
 
   Future<void> exportCsv() async {
@@ -176,7 +224,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         controller: _tabController,
         children: [
           _buildDashboardTab(data, machineProv),
-          const SalesScreen(),
+          const CuttingLogsScreen(),
         ],
       ),
     );
@@ -212,44 +260,65 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           ),
           const SizedBox(height: 24),
 
-          // Status Cards Grid
-          GridView.count(
-            crossAxisCount: 2,
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            crossAxisSpacing: 16,
-            mainAxisSpacing: 16,
-            childAspectRatio: 1.2,
-            children: [
-              _buildStatusCard(
-                'Current Length',
-                '${data?.currentLength.toStringAsFixed(1) ?? '—'}',
-                'mm',
-                Icons.straighten,
-                Colors.blue,
-              ),
-              _buildStatusCard(
-                'Today Total',
-                '${((data?.totalToday ?? 0) / 1000).toStringAsFixed(2)}',
-                'm',
-                Icons.today,
-                Colors.green,
-              ),
-              _buildStatusCard(
-                'Lifetime Total',
-                '${((data?.lifetime ?? 0) / 1000).toStringAsFixed(1)}',
-                'm',
-                Icons.history,
-                Colors.purple,
-              ),
-              _buildStatusCard(
-                'Machine Status',
-                data?.isRunning == true ? 'ACTIVE' : 'IDLE',
-                '',
-                data?.isRunning == true ? Icons.play_circle : Icons.pause_circle,
-                data?.isRunning == true ? Colors.green : Colors.orange,
-              ),
-            ],
+          // Status Cards Grid with Actual Length from Cutting Logs
+          StreamBuilder<QuerySnapshot>(
+            stream: cuttingLogsStream(),
+            builder: (context, cuttingSnapshot) {
+              double? latestActualLength;
+
+              if (cuttingSnapshot.hasData && cuttingSnapshot.data!.docs.isNotEmpty) {
+                final latestCut = cuttingSnapshot.data!.docs.first.data() as Map<String, dynamic>;
+                latestActualLength = (latestCut['actualLength'] as num?)?.toDouble();
+              }
+
+              return FutureBuilder<Map<String, double>>(
+                future: getCuttingLogTotals(),
+                builder: (context, totalsSnapshot) {
+                  final totals = totalsSnapshot.data ?? {'daily': 0.0, 'weekly': 0.0};
+
+                  return GridView.count(
+                    crossAxisCount: 2,
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    crossAxisSpacing: 16,
+                    mainAxisSpacing: 16,
+                    childAspectRatio: 1.2,
+                    children: [
+                      _buildStatusCard(
+                        'Latest Cut Length',
+                        latestActualLength != null
+                            ? '${latestActualLength.toStringAsFixed(2)}'
+                            : '—',
+                        'm',
+                        Icons.content_cut,
+                        Colors.blue,
+                      ),
+                      _buildStatusCard(
+                        'Today Total',
+                        '${totals['daily']!.toStringAsFixed(2)}',
+                        'm',
+                        Icons.today,
+                        Colors.green,
+                      ),
+                      _buildStatusCard(
+                        'Weekly Total',
+                        '${totals['weekly']!.toStringAsFixed(2)}',
+                        'm',
+                        Icons.date_range,
+                        Colors.purple,
+                      ),
+                      _buildStatusCard(
+                        'Machine Status',
+                        data?.isRunning == true ? 'ACTIVE' : 'IDLE',
+                        '',
+                        data?.isRunning == true ? Icons.play_circle : Icons.pause_circle,
+                        data?.isRunning == true ? Colors.green : Colors.orange,
+                      ),
+                    ],
+                  );
+                },
+              );
+            },
           ),
 
           const SizedBox(height: 32),
@@ -276,7 +345,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                       () {
                     Navigator.push(
                       context,
-                      MaterialPageRoute(builder: (context) => const DeviceSetupScreen()),
+                      MaterialPageRoute(builder: (context) => const BluetoothScanScreen()),
                     );
                   },
                 ),
@@ -296,8 +365,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
           const SizedBox(height: 24),
 
-          // Recent Activity Card
-          _buildRecentActivityCard(),
+          // Recent Cutting Activity Card (from cutting logs instead of machine history)
+          _buildRecentCuttingActivityCard(),
         ],
       ),
     );
@@ -347,12 +416,15 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text(
-                  value,
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.black87,
+                Flexible(
+                  child: Text(
+                    value,
+                    style: const TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
                 if (unit.isNotEmpty) ...[
@@ -416,7 +488,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     );
   }
 
-  Widget _buildRecentActivityCard() {
+  Widget _buildRecentCuttingActivityCard() {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -437,10 +509,10 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           children: [
             Row(
               children: [
-                Icon(Icons.history, color: Colors.grey[600], size: 20),
+                Icon(Icons.content_cut, color: Colors.grey[600], size: 20),
                 const SizedBox(width: 8),
                 Text(
-                  'Recent Activity',
+                  'Recent Cuts',
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.w600,
@@ -451,7 +523,11 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
             ),
             const SizedBox(height: 16),
             StreamBuilder<QuerySnapshot>(
-              stream: historyStream(),
+              stream: FirebaseFirestore.instance
+                  .collection('cuttingLogs')
+                  .orderBy('timestamp', descending: true)
+                  .limit(3)
+                  .snapshots(),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(
@@ -471,7 +547,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                           Icon(Icons.inbox_outlined, size: 48, color: Colors.grey[400]),
                           const SizedBox(height: 8),
                           Text(
-                            'No recent activity',
+                            'No recent cuts',
                             style: TextStyle(color: Colors.grey[600]),
                           ),
                         ],
@@ -480,14 +556,33 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                   );
                 }
 
-                final recentDocs = snapshot.data!.docs.take(3).toList();
+                final recentDocs = snapshot.data!.docs;
 
                 return Column(
                   children: recentDocs.map((doc) {
-                    final m = doc.data() as Map<String, dynamic>;
-                    final timestamp = m['timestamp'] ?? '';
-                    final currentLength = m['currentLength']?.toString() ?? '0';
-                    final isRunning = m['isRunning'] ?? false;
+                    final cutData = doc.data() as Map<String, dynamic>;
+                    final actualLength = (cutData['actualLength'] as num?)?.toDouble() ?? 0;
+                    final targetLength = (cutData['targetLength'] as num?)?.toDouble() ?? 0;
+                    final accuracy = (cutData['accuracy'] as num?)?.toDouble() ?? 0;
+                    final timestamp = cutData['timestamp'] as Timestamp?;
+
+                    // Format timestamp
+                    String timeStr = 'Unknown time';
+                    if (timestamp != null) {
+                      final dateTime = timestamp.toDate();
+                      final now = DateTime.now();
+                      final difference = now.difference(dateTime);
+
+                      if (difference.inMinutes < 1) {
+                        timeStr = 'Just now';
+                      } else if (difference.inHours < 1) {
+                        timeStr = '${difference.inMinutes}m ago';
+                      } else if (difference.inDays < 1) {
+                        timeStr = '${difference.inHours}h ago';
+                      } else {
+                        timeStr = '${difference.inDays}d ago';
+                      }
+                    }
 
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 12),
@@ -497,7 +592,8 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                             width: 8,
                             height: 8,
                             decoration: BoxDecoration(
-                              color: isRunning ? Colors.green : Colors.grey,
+                              color: accuracy >= 95 ? Colors.green :
+                              accuracy >= 90 ? Colors.orange : Colors.red,
                               shape: BoxShape.circle,
                             ),
                           ),
@@ -507,14 +603,14 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Length: ${currentLength}mm',
+                                  'Length:   ${targetLength.toStringAsFixed(2)}m',
                                   style: const TextStyle(
                                     fontWeight: FontWeight.w500,
                                     fontSize: 14,
                                   ),
                                 ),
                                 Text(
-                                  timestamp,
+                                  timeStr,
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: Colors.grey[600],
@@ -526,13 +622,16 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                             decoration: BoxDecoration(
-                              color: isRunning ? Colors.green.withOpacity(0.1) : Colors.grey.withOpacity(0.1),
+                              color: accuracy >= 95 ? Colors.green.withOpacity(0.1) :
+                              accuracy >= 90 ? Colors.orange.withOpacity(0.1) :
+                              Colors.red.withOpacity(0.1),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: Text(
-                              isRunning ? 'RUNNING' : 'IDLE',
+                              '${accuracy.toStringAsFixed(1)}%',
                               style: TextStyle(
-                                color: isRunning ? Colors.green : Colors.grey,
+                                color: accuracy >= 95 ? Colors.green :
+                                accuracy >= 90 ? Colors.orange : Colors.red,
                                 fontSize: 10,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -552,7 +651,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Text(
-                    'Sales History',
+                    'View All Cuts',
                     style: TextStyle(
                       color: Colors.blue[600],
                       fontWeight: FontWeight.w600,
