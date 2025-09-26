@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../providers/auth_provider.dart';
+import './auth_wrapper.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -72,12 +72,10 @@ class _SplashScreenState extends State<SplashScreen>
     // Navigation logic with delay
     Future.delayed(const Duration(milliseconds: 2000), () {
       if (mounted) {
-        final auth = Provider.of<AuthProvider>(context, listen: false);
-        if (auth.user != null) {
-          Navigator.pushReplacementNamed(context, '/dashboard');
-        } else {
-          Navigator.pushReplacementNamed(context, '/dashboard');// change to login
-        }
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (context) => const AuthWrapper()),
+        );
       }
     });
   }
