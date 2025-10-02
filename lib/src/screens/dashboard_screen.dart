@@ -87,64 +87,24 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   Future<void> exportExcel() async {
     setState(() => exporting = true);
     try {
-      final historySnap = await FirebaseFirestore.instance
-          .collection('machines')
-          .doc(machineId)
-          .collection('history')
-          .orderBy('timestamp')
-          .get();
       final cuttingLogsSnap = await FirebaseFirestore.instance
           .collection('cuttingLogs')
           .orderBy('timestamp')
           .get();
 
       final excel = Excel.createExcel();
-      excel.delete('Sheet1');
+      final cuttingSheet = excel['Sheet1'];
 
-      final machineSheet = excel['Machine History'];
-      final cuttingSheet = excel['Cutting Logs'];
       final summarySheet = excel['Summary'];
       final totals = await getCuttingLogTotals();
 
-      // Style helper
-      CellStyle headerStyle(Color bg, Color fg) => CellStyle(
-          bold: true, backgroundColorHex: bg.value.toRadixString(16).substring(2).toUpperCase(), fontColorHex: fg.value.toRadixString(16).substring(2).toUpperCase());
-
-      // Machine History headers
-      const machineHeaders = [
-        'Timestamp',
-        'Current Length (mm)',
-        'Total Today (mm)',
-        'Lifetime (mm)',
-        'Is Running',
-      ];
-      for (var i = 0; i < machineHeaders.length; i++) {
-        machineSheet.cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0)).value = machineHeaders[i];
-        machineSheet.cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0)).cellStyle = CellStyle(
-          bold: true,
-          backgroundColorHex: '#E3F2FD',
-          fontColorHex: '#1976D2',
-        );
-      }
-      int row = 1;
-      for (var doc in historySnap.docs) {
-        final data = doc.data();
-        machineSheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value =
-            (data['timestamp'] as Timestamp?)?.toDate().toIso8601String() ?? '';
-        machineSheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = data['currentLength'] ?? 0;
-        machineSheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: row)).value = data['totalToday'] ?? 0;
-        machineSheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: row)).value = data['lifetime'] ?? 0;
-        machineSheet.cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: row)).value = data['isRunning'] ?? false;
-        row++;
-      }
-
       // Cutting Logs headers
       const cuttingHeaders = [
-        'Timestamp',
+        'Date & Time',
         'Target Length (m)',
-        'Actual Length (m)',
-        'Accuracy (%)',
-        'Cut Duration (s)',
+        // 'Actual Length (m)',
+        // 'Accuracy (%)',
+        // 'Cut Duration (s)',
       ];
       for (var i = 0; i < cuttingHeaders.length; i++) {
         cuttingSheet.cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0)).value = cuttingHeaders[i];
@@ -154,15 +114,19 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           fontColorHex: '#2E7D32',
         );
       }
-      row = 1;
+
+      int row = 1;
       for (var doc in cuttingLogsSnap.docs) {
         final data = doc.data();
-        cuttingSheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value =
-            (data['timestamp'] as Timestamp?)?.toDate().toIso8601String() ?? '';
+
+        // Use formattedTime instead of timestamp
+        final formattedTime = data['formattedTime'] as String? ?? '';
+
+        cuttingSheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value = formattedTime;
         cuttingSheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = data['targetLength'] ?? 0;
-        cuttingSheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: row)).value = data['actualLength'] ?? 0;
-        cuttingSheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: row)).value = data['accuracy'] ?? 0;
-        cuttingSheet.cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: row)).value = data['cutDuration'] ?? 0;
+        // cuttingSheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: row)).value = data['actualLength'] ?? 0;
+        // cuttingSheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: row)).value = data['accuracy'] ?? 0;
+        // cuttingSheet.cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: row)).value = data['cutDuration'] ?? 0;
         row++;
       }
 
@@ -175,20 +139,16 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         fontColorHex: '#F57C00',
       );
 
-      summarySheet.cell(CellIndex.indexByString('A3')).value = 'Machine ID';
-      summarySheet.cell(CellIndex.indexByString('B3')).value = machineId;
-      summarySheet.cell(CellIndex.indexByString('A4')).value = 'Export Date';
-      summarySheet.cell(CellIndex.indexByString('B4')).value = DateTime.now().toIso8601String();
-      summarySheet.cell(CellIndex.indexByString('A5')).value = 'Daily Total (m)';
-      summarySheet.cell(CellIndex.indexByString('B5')).value = totals['daily']?.toStringAsFixed(2);
-      summarySheet.cell(CellIndex.indexByString('A6')).value = 'Weekly Total (m)';
-      summarySheet.cell(CellIndex.indexByString('B6')).value = totals['weekly']?.toStringAsFixed(2);
-      summarySheet.cell(CellIndex.indexByString('A7')).value = 'Total Machine Records';
-      summarySheet.cell(CellIndex.indexByString('B7')).value = historySnap.docs.length;
-      summarySheet.cell(CellIndex.indexByString('A8')).value = 'Total Cutting Records';
-      summarySheet.cell(CellIndex.indexByString('B8')).value = cuttingLogsSnap.docs.length;
+      summarySheet.cell(CellIndex.indexByString('A3')).value = 'Export Date';
+      summarySheet.cell(CellIndex.indexByString('B3')).value = DateTime.now().toIso8601String();
+      summarySheet.cell(CellIndex.indexByString('A4')).value = 'Daily Total (m)';
+      summarySheet.cell(CellIndex.indexByString('B4')).value = totals['daily']?.toStringAsFixed(2);
+      summarySheet.cell(CellIndex.indexByString('A5')).value = 'Weekly Total (m)';
+      summarySheet.cell(CellIndex.indexByString('B5')).value = totals['weekly']?.toStringAsFixed(2);
+      summarySheet.cell(CellIndex.indexByString('A6')).value = 'Total Cutting Records';
+      summarySheet.cell(CellIndex.indexByString('B6')).value = cuttingLogsSnap.docs.length;
 
-      for (int r = 2; r < 9; r++) {
+      for (int r = 2; r < 7; r++) {
         summarySheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r)).cellStyle = CellStyle(
           bold: true,
           fontColorHex: '#424242',
@@ -198,12 +158,12 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       final tmp = await getTemporaryDirectory();
       final now = DateTime.now();
       final dateStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
-      final file = File('${tmp.path}/machine_${machineId}_data_$dateStr.xlsx');
+      final file = File('${tmp.path}/cutting_logs_$dateStr.xlsx');
 
       final excelBytes = excel.encode();
       if (excelBytes != null) {
         await file.writeAsBytes(excelBytes);
-        await Share.shareXFiles([XFile(file.path)], text: 'Machine $machineId Excel Report');
+        await Share.shareXFiles([XFile(file.path)], text: 'Cutting Logs Excel Report');
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
