@@ -41,21 +41,11 @@ class _CuttingLogsScreenState extends State<CuttingLogsScreen>
   Stream<QuerySnapshot> _cuttingLogsStream() {
     return FirebaseFirestore.instance
         .collection('cuttingLogs')
-        .orderBy('formattedTime', descending: true)
+        .orderBy('timestamp', descending: true)
         .snapshots();
   }
 
-  /// Parse formattedTime string to DateTime
-  DateTime _parseFormattedTime(String formattedTime) {
-    try {
-      // Remove 'IST' suffix and parse the datetime
-      final cleanTime = formattedTime.replaceAll(' IST', '');
-      return DateTime.parse(cleanTime);
-    } catch (e) {
-      // Fallback to current time if parsing fails
-      return DateTime.now();
-    }
-  }
+
 
   /// Calculate daily / weekly / monthly totals
   Map<String, double> _calculateTotals(List<QueryDocumentSnapshot> docs) {
@@ -69,8 +59,7 @@ class _CuttingLogsScreenState extends State<CuttingLogsScreen>
     for (var doc in docs) {
       final data = doc.data() as Map<String, dynamic>;
       final actualLength = (data['actualLength'] as num?)?.toDouble() ?? 0;
-      final formattedTime = data['formattedTime'] as String? ?? '';
-      final ts = _parseFormattedTime(formattedTime);
+      final ts = (data['timestamp'] as Timestamp).toDate();
 
       // Daily
       if (ts.isAfter(today)) {
@@ -254,10 +243,36 @@ class _CuttingLogsScreenState extends State<CuttingLogsScreen>
               ),
               itemBuilder: (context, i) {
                 final data = docs[i].data() as Map<String, dynamic>;
-                final formattedTime = data['formattedTime'] as String? ?? '';
-                final ts = _parseFormattedTime(formattedTime);
+                final ts = (data['timestamp'] as Timestamp).toDate();
                 final actualLength = (data['actualLength'] as num?)?.toDouble() ?? 0;
+                final formattedTimeRaw = data['formattedTime'] as String? ?? '';
                 final isToday = _isToday(ts);
+
+                // Parse and reformat to DD-MM-YY HH:MM
+                String displayTime = 'Unknown time';
+                if (formattedTimeRaw.isNotEmpty) {
+                  try {
+                    final parts = formattedTimeRaw.split(' ');
+                    if (parts.length >= 2) {
+                      final datePart = parts[0];
+                      final timePart = parts[1];
+
+                      final dateComponents = datePart.split('-');
+                      final timeComponents = timePart.split(':');
+
+                      if (dateComponents.length == 3 && timeComponents.length >= 2) {
+                        final year = dateComponents[0].substring(2);
+                        final month = dateComponents[1];
+                        final day = dateComponents[2];
+                        final hour = timeComponents[0];
+                        final minute = timeComponents[1];
+                        displayTime = '$day-$month-$year $hour:$minute';
+                      }
+                    }
+                  } catch (e) {
+                    displayTime = formattedTimeRaw;
+                  }
+                }
 
                 return Container(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -310,14 +325,31 @@ class _CuttingLogsScreenState extends State<CuttingLogsScreen>
                                   ),
                               ],
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              _formatTimestamp(ts),
-                              style: TextStyle(
-                                color: Colors.grey[600],
-                                fontSize: 13,
-                                fontWeight: FontWeight.w400,
-                              ),
+                            const SizedBox(height: 6),
+                            Row(
+                              children: [
+                                Icon(Icons.calendar_today, size: 12, color: Colors.grey[500]),
+                                const SizedBox(width: 4),
+                                Text(
+                                  displayTime.split(' ')[0],
+                                  style: TextStyle(
+                                    color: Colors.grey[600],
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Icon(Icons.access_time, size: 12, color: Colors.grey[500]),
+                                const SizedBox(width: 4),
+                                Text(
+                                  displayTime.split(' ').length > 1 ? displayTime.split(' ')[1] : '',
+                                  style: TextStyle(
+                                    color: Colors.grey[600],
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                              ],
                             ),
                           ],
                         ),

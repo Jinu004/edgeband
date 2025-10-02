@@ -24,7 +24,7 @@ class CuttingLogService {
       'deviceId': deviceId,
       'motorSpeed': motorSpeed,
       'rollerDiameter': rollerDiameter,
-      'timestamp': DateTime.now(),
+      'timestamp': FieldValue.serverTimestamp(),
     });
   }
 

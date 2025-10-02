@@ -33,19 +33,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _buildSectionTitle('Account'),
-            _buildSettingsCard([
-              _buildListTile(
-                icon: Icons.person_outline,
-                title: 'Profile',
-                subtitle: 'Manage your profile information',
-                onTap: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Profile tapped')),
-                  );
-                },
-              ),
-            ]),
+            // _buildSectionTitle('Account'),
+            // _buildSettingsCard([
+            //   _buildListTile(
+            //     icon: Icons.person_outline,
+            //     title: 'Profile',
+            //     subtitle: 'Manage your profile information',
+            //     onTap: () {
+            //       ScaffoldMessenger.of(context).showSnackBar(
+            //         const SnackBar(content: Text('Profile tapped')),
+            //       );
+            //     },
+            //   ),
+            // ]),
 
             const SizedBox(height: 24),
 

@@ -29,7 +29,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
     rows.add(['timestamp','currentLength_mm','totalToday_mm','lifetime_mm','isRunning']);
     for (var d in snap.docs) {
       final m = d.data() as Map<String, dynamic>;
-      rows.add([m['timestamp'] ?? '', m['currentLength'] ?? 0, m['totalToday'] ?? 0, m['lifetime'] ?? 0, m['isRunning'] ?? false]);
+      final timestamp = (m['timestamp'] as Timestamp?)?.toDate().toString() ?? '';
+      rows.add([timestamp, m['currentLength'] ?? 0, m['totalToday'] ?? 0, m['lifetime'] ?? 0, m['isRunning'] ?? false]);
     }
     final csv = const ListToCsvConverter().convert(rows);
     final tmp = await getTemporaryDirectory();
@@ -54,9 +55,10 @@ class _HistoryScreenState extends State<HistoryScreen> {
                   itemCount: docs.length,
                   itemBuilder: (c, i) {
                     final m = docs[i].data() as Map<String, dynamic>;
+                    final timestamp = (m['timestamp'] as Timestamp?)?.toDate().toString() ?? '';
                     return ListTile(
                       title: Text('Current: ${m['currentLength']} mm'),
-                      subtitle: Text('${m['timestamp']} • Running: ${m['isRunning']}'),
+                      subtitle: Text('$timestamp • Running: ${m['isRunning']}'),
                     );
                   },
                 );

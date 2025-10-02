@@ -1,3 +1,5 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
+
 class MachineData {
   final double currentLength; // mm
   final double totalToday; // mm
@@ -19,7 +21,7 @@ class MachineData {
       totalToday: (m['totalToday'] ?? 0).toDouble(),
       lifetime: (m['lifetime'] ?? 0).toDouble(),
       isRunning: (m['isRunning'] ?? false),
-      timestamp: DateTime.parse(m['timestamp'] ?? DateTime.now().toIso8601String()),
+      timestamp: (m['timestamp'] as Timestamp? ?? Timestamp.now()).toDate(),
     );
   }
 
@@ -28,6 +30,6 @@ class MachineData {
         'totalToday': totalToday,
         'lifetime': lifetime,
         'isRunning': isRunning,
-        'timestamp': timestamp.toIso8601String(),
+        'timestamp': Timestamp.fromDate(timestamp),
       };
 }

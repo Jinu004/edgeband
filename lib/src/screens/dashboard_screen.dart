@@ -5,7 +5,7 @@ import 'package:jv/src/screens/settings%20screen.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:csv/csv.dart';
+import 'package:excel/excel.dart';
 import 'package:share_plus/share_plus.dart';
 import '../providers/auth_provider.dart';
 import '../providers/machine_provider.dart';
@@ -20,9 +20,6 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProviderStateMixin {
   final machineId = 'machine-1';
-  final targetCtl = TextEditingController();
-  final offsetCtl = TextEditingController();
-  bool sending = false;
   bool exporting = false;
   late TabController _tabController;
 
@@ -31,6 +28,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     final machineProv = Provider.of<MachineProvider>(context, listen: false);
+    // Watch machine data updates
     machineProv.watch(machineId).listen((m) {
       if (m != null) machineProv.setCurrent(m);
     });
@@ -38,8 +36,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
   @override
   void dispose() {
-    targetCtl.dispose();
-    offsetCtl.dispose();
     _tabController.dispose();
     super.dispose();
   }
@@ -53,7 +49,6 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         .snapshots();
   }
 
-  // Get the latest cutting log for actual length
   Stream<QuerySnapshot<Map<String, dynamic>>> cuttingLogsStream() {
     return FirebaseFirestore.instance
         .collection('cuttingLogs')
@@ -62,12 +57,10 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         .snapshots();
   }
 
-  // Get daily total from cutting logs
   Future<Map<String, double>> getCuttingLogTotals() async {
     try {
       final now = DateTime.now();
       final today = DateTime(now.year, now.month, now.day);
-
       final snapshot = await FirebaseFirestore.instance
           .collection('cuttingLogs')
           .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(today))
@@ -81,71 +74,153 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
         final actualLength = (data['actualLength'] as num?)?.toDouble() ?? 0;
         final timestamp = (data['timestamp'] as Timestamp).toDate();
 
-        // Daily total
-        if (timestamp.isAfter(today)) {
-          dailyTotal += actualLength;
-        }
+        if (timestamp.isAfter(today)) dailyTotal += actualLength;
 
-        // Weekly total (last 7 days)
-        if (timestamp.isAfter(now.subtract(const Duration(days: 7)))) {
-          weeklyTotal += actualLength;
-        }
+        if (timestamp.isAfter(now.subtract(const Duration(days: 7)))) weeklyTotal += actualLength;
       }
-
-      return {
-        'daily': dailyTotal,
-        'weekly': weeklyTotal,
-      };
+      return {'daily': dailyTotal, 'weekly': weeklyTotal};
     } catch (e) {
       return {'daily': 0.0, 'weekly': 0.0};
     }
   }
 
-  Future<void> exportCsv() async {
+  Future<void> exportExcel() async {
     setState(() => exporting = true);
     try {
-      final snap = await FirebaseFirestore.instance
+      final historySnap = await FirebaseFirestore.instance
           .collection('machines')
           .doc(machineId)
           .collection('history')
           .orderBy('timestamp')
           .get();
+      final cuttingLogsSnap = await FirebaseFirestore.instance
+          .collection('cuttingLogs')
+          .orderBy('timestamp')
+          .get();
 
-      final rows = <List<dynamic>>[];
-      rows.add(['timestamp', 'currentLength_mm', 'totalToday_mm', 'lifetime_mm', 'isRunning']);
+      final excel = Excel.createExcel();
+      excel.delete('Sheet1');
 
-      for (var d in snap.docs) {
-        final m = d.data() as Map<String, dynamic>;
-        rows.add([
-          m['timestamp'] ?? '',
-          m['currentLength'] ?? 0,
-          m['totalToday'] ?? 0,
-          m['lifetime'] ?? 0,
-          m['isRunning'] ?? false
-        ]);
+      final machineSheet = excel['Machine History'];
+      final cuttingSheet = excel['Cutting Logs'];
+      final summarySheet = excel['Summary'];
+      final totals = await getCuttingLogTotals();
+
+      // Style helper
+      CellStyle headerStyle(Color bg, Color fg) => CellStyle(
+          bold: true, backgroundColorHex: bg.value.toRadixString(16).substring(2).toUpperCase(), fontColorHex: fg.value.toRadixString(16).substring(2).toUpperCase());
+
+      // Machine History headers
+      const machineHeaders = [
+        'Timestamp',
+        'Current Length (mm)',
+        'Total Today (mm)',
+        'Lifetime (mm)',
+        'Is Running',
+      ];
+      for (var i = 0; i < machineHeaders.length; i++) {
+        machineSheet.cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0)).value = machineHeaders[i];
+        machineSheet.cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0)).cellStyle = CellStyle(
+          bold: true,
+          backgroundColorHex: '#E3F2FD',
+          fontColorHex: '#1976D2',
+        );
+      }
+      int row = 1;
+      for (var doc in historySnap.docs) {
+        final data = doc.data();
+        machineSheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value =
+            (data['timestamp'] as Timestamp?)?.toDate().toIso8601String() ?? '';
+        machineSheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = data['currentLength'] ?? 0;
+        machineSheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: row)).value = data['totalToday'] ?? 0;
+        machineSheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: row)).value = data['lifetime'] ?? 0;
+        machineSheet.cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: row)).value = data['isRunning'] ?? false;
+        row++;
       }
 
-      final csv = const ListToCsvConverter().convert(rows);
-      final tmp = await getTemporaryDirectory();
-      final file = File('${tmp.path}/machine_${machineId}_history.csv');
-      await file.writeAsString(csv);
-      await Share.shareXFiles([XFile(file.path)], text: 'Machine $machineId history CSV');
-
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Row(
-              children: [
-                Icon(Icons.check_circle, color: Colors.white),
-                SizedBox(width: 8),
-                Text('CSV exported successfully'),
-              ],
-            ),
-            backgroundColor: Colors.green,
-            behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-          ),
+      // Cutting Logs headers
+      const cuttingHeaders = [
+        'Timestamp',
+        'Target Length (m)',
+        'Actual Length (m)',
+        'Accuracy (%)',
+        'Cut Duration (s)',
+      ];
+      for (var i = 0; i < cuttingHeaders.length; i++) {
+        cuttingSheet.cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0)).value = cuttingHeaders[i];
+        cuttingSheet.cell(CellIndex.indexByColumnRow(columnIndex: i, rowIndex: 0)).cellStyle = CellStyle(
+          bold: true,
+          backgroundColorHex: '#E8F5E8',
+          fontColorHex: '#2E7D32',
         );
+      }
+      row = 1;
+      for (var doc in cuttingLogsSnap.docs) {
+        final data = doc.data();
+        cuttingSheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: row)).value =
+            (data['timestamp'] as Timestamp?)?.toDate().toIso8601String() ?? '';
+        cuttingSheet.cell(CellIndex.indexByColumnRow(columnIndex: 1, rowIndex: row)).value = data['targetLength'] ?? 0;
+        cuttingSheet.cell(CellIndex.indexByColumnRow(columnIndex: 2, rowIndex: row)).value = data['actualLength'] ?? 0;
+        cuttingSheet.cell(CellIndex.indexByColumnRow(columnIndex: 3, rowIndex: row)).value = data['accuracy'] ?? 0;
+        cuttingSheet.cell(CellIndex.indexByColumnRow(columnIndex: 4, rowIndex: row)).value = data['cutDuration'] ?? 0;
+        row++;
+      }
+
+      // Summary sheet
+      summarySheet.cell(CellIndex.indexByString('A1')).value = 'Summary Report';
+      summarySheet.cell(CellIndex.indexByString('A1')).cellStyle = CellStyle(
+        bold: true,
+        fontSize: 16,
+        backgroundColorHex: '#FFF3E0',
+        fontColorHex: '#F57C00',
+      );
+
+      summarySheet.cell(CellIndex.indexByString('A3')).value = 'Machine ID';
+      summarySheet.cell(CellIndex.indexByString('B3')).value = machineId;
+      summarySheet.cell(CellIndex.indexByString('A4')).value = 'Export Date';
+      summarySheet.cell(CellIndex.indexByString('B4')).value = DateTime.now().toIso8601String();
+      summarySheet.cell(CellIndex.indexByString('A5')).value = 'Daily Total (m)';
+      summarySheet.cell(CellIndex.indexByString('B5')).value = totals['daily']?.toStringAsFixed(2);
+      summarySheet.cell(CellIndex.indexByString('A6')).value = 'Weekly Total (m)';
+      summarySheet.cell(CellIndex.indexByString('B6')).value = totals['weekly']?.toStringAsFixed(2);
+      summarySheet.cell(CellIndex.indexByString('A7')).value = 'Total Machine Records';
+      summarySheet.cell(CellIndex.indexByString('B7')).value = historySnap.docs.length;
+      summarySheet.cell(CellIndex.indexByString('A8')).value = 'Total Cutting Records';
+      summarySheet.cell(CellIndex.indexByString('B8')).value = cuttingLogsSnap.docs.length;
+
+      for (int r = 2; r < 9; r++) {
+        summarySheet.cell(CellIndex.indexByColumnRow(columnIndex: 0, rowIndex: r)).cellStyle = CellStyle(
+          bold: true,
+          fontColorHex: '#424242',
+        );
+      }
+
+      final tmp = await getTemporaryDirectory();
+      final now = DateTime.now();
+      final dateStr = '${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+      final file = File('${tmp.path}/machine_${machineId}_data_$dateStr.xlsx');
+
+      final excelBytes = excel.encode();
+      if (excelBytes != null) {
+        await file.writeAsBytes(excelBytes);
+        await Share.shareXFiles([XFile(file.path)], text: 'Machine $machineId Excel Report');
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Row(
+                children: [
+                  Icon(Icons.check_circle, color: Colors.white),
+                  SizedBox(width: 8),
+                  Text('Excel file exported successfully'),
+                ],
+              ),
+              backgroundColor: Colors.green,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          );
+        }
       }
     } catch (e) {
       if (mounted) {
@@ -155,7 +230,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
               children: [
                 const Icon(Icons.error, color: Colors.white),
                 const SizedBox(width: 8),
-                Text('Export failed: $e'),
+                Flexible(child: Text('Export failed: $e', overflow: TextOverflow.ellipsis)),
               ],
             ),
             backgroundColor: Colors.red,
@@ -171,28 +246,44 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
   @override
   Widget build(BuildContext context) {
-    final auth = Provider.of<AuthProvider>(context);
     final machineProv = Provider.of<MachineProvider>(context);
     final MachineData? data = machineProv.current;
 
     return Scaffold(
       backgroundColor: Colors.grey[50],
-      appBar: AppBar(actions: [
-        IconButton(onPressed: (){
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => const SettingsScreen()),
-          );
-
-        }, icon: Icon(Icons.settings))
-      ],
+      appBar: AppBar(
         elevation: 0,
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
         title: const Text(
-          'Machine Dashboard',
-          style: TextStyle(fontWeight: FontWeight.w600),
+          'Jv Interiors',
+          style: TextStyle(
+            fontWeight: FontWeight.w600,
+            fontSize: 28,
+            color: Colors.black54,
+            letterSpacing: 1.5,
+            shadows: [
+              Shadow(
+                offset: Offset(1, 1),
+                blurRadius: 3,
+                color: Colors.black26,
+              ),
+            ],
+            fontFamily: 'Montserrat',
+          ),
         ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.settings),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const SettingsScreen()),
+              );
+            },
+            tooltip: 'Settings',
+          )
+        ],
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(60),
           child: Container(
@@ -200,21 +291,13 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
             child: TabBar(
               controller: _tabController,
               indicatorColor: Colors.blue[600],
-              indicatorWeight: 3,
+              indicatorWeight: 4,
               labelColor: Colors.blue[600],
               unselectedLabelColor: Colors.grey[600],
               labelStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
               tabs: const [
-                Tab(
-                  icon: Icon(Icons.dashboard_outlined, size: 22),
-                  text: 'Status',
-                  height: 60,
-                ),
-                Tab(
-                  icon: Icon(Icons.analytics_outlined, size: 22),
-                  text: 'Sales History',
-                  height: 60,
-                ),
+                Tab(icon: Icon(Icons.dashboard_outlined, size: 22), text: 'Status', height: 60),
+                Tab(icon: Icon(Icons.analytics_outlined, size: 22), text: 'Sales History', height: 60),
               ],
             ),
           ),
@@ -223,25 +306,77 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
       body: TabBarView(
         controller: _tabController,
         children: [
-          _buildDashboardTab(data, machineProv),
+          _DashboardTab(data: data, machineId: machineId, exportExcel: exporting ? null : exportExcel, exporting: exporting),
           const CuttingLogsScreen(),
         ],
       ),
     );
   }
+}
 
-  Widget _buildDashboardTab(MachineData? data, MachineProvider machineProv) {
+class _DashboardTab extends StatelessWidget {
+  final MachineData? data;
+  final String machineId;
+  final Future<void> Function()? exportExcel;
+  final bool exporting;
+
+  const _DashboardTab({
+    Key? key,
+    required this.data,
+    required this.machineId,
+    required this.exportExcel,
+    required this.exporting,
+  }) : super(key: key);
+
+  Stream<QuerySnapshot<Map<String, dynamic>>> cuttingLogsStream() {
+    return FirebaseFirestore.instance
+        .collection('cuttingLogs')
+        .orderBy('timestamp', descending: true)
+        .limit(1)
+        .snapshots();
+  }
+
+  Future<Map<String, double>> getCuttingLogTotals() async {
+    try {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      final snapshot = await FirebaseFirestore.instance
+          .collection('cuttingLogs')
+          .where('timestamp', isGreaterThanOrEqualTo: Timestamp.fromDate(today))
+          .get();
+
+      double dailyTotal = 0;
+      double weeklyTotal = 0;
+
+      for (var doc in snapshot.docs) {
+        final data = doc.data();
+        final actualLength = (data['actualLength'] as num?)?.toDouble() ?? 0;
+        final timestamp = (data['timestamp'] as Timestamp).toDate();
+
+        if (timestamp.isAfter(today)) dailyTotal += actualLength;
+
+        if (timestamp.isAfter(now.subtract(const Duration(days: 7)))) weeklyTotal += actualLength;
+      }
+      return {'daily': dailyTotal, 'weekly': weeklyTotal};
+    } catch (e) {
+      return {'daily': 0.0, 'weekly': 0.0};
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20.0),
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Status Header with Live Indicator
+          // Live Status Header
           Row(
             children: [
-              Container(
-                width: 8,
-                height: 8,
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                width: 10,
+                height: 10,
                 decoration: BoxDecoration(
                   color: data?.isRunning == true ? Colors.green : Colors.orange,
                   shape: BoxShape.circle,
@@ -260,15 +395,14 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           ),
           const SizedBox(height: 24),
 
-          // Status Cards Grid with Actual Length from Cutting Logs
-          StreamBuilder<QuerySnapshot>(
+          // Status Cards Grid
+          StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
             stream: cuttingLogsStream(),
             builder: (context, cuttingSnapshot) {
               double? latestActualLength;
-
               if (cuttingSnapshot.hasData && cuttingSnapshot.data!.docs.isNotEmpty) {
-                final latestCut = cuttingSnapshot.data!.docs.first.data() as Map<String, dynamic>;
-                latestActualLength = (latestCut['actualLength'] as num?)?.toDouble();
+                final latestCut = cuttingSnapshot.data!.docs.first.data();
+                latestActualLength = (latestCut['targetLength'] as num?)?.toDouble();
               }
 
               return FutureBuilder<Map<String, double>>(
@@ -284,35 +418,35 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
                     mainAxisSpacing: 16,
                     childAspectRatio: 1.2,
                     children: [
-                      _buildStatusCard(
-                        'Latest Cut Length',
-                        latestActualLength != null
+                      _StatusCard(
+                        title: 'Latest Cut Length',
+                        value: latestActualLength != null
                             ? '${latestActualLength.toStringAsFixed(2)}'
                             : '—',
-                        'm',
-                        Icons.content_cut,
-                        Colors.blue,
+                        unit: 'm',
+                        icon: Icons.content_cut,
+                        color: Colors.blue,
                       ),
-                      _buildStatusCard(
-                        'Today Total',
-                        '${totals['daily']!.toStringAsFixed(2)}',
-                        'm',
-                        Icons.today,
-                        Colors.green,
+                      _StatusCard(
+                        title: 'Today Total',
+                        value: totals['daily']!.toStringAsFixed(2),
+                        unit: 'm',
+                        icon: Icons.today,
+                        color: Colors.green,
                       ),
-                      _buildStatusCard(
-                        'Weekly Total',
-                        '${totals['weekly']!.toStringAsFixed(2)}',
-                        'm',
-                        Icons.date_range,
-                        Colors.purple,
+                      _StatusCard(
+                        title: 'Weekly Total',
+                        value: totals['weekly']!.toStringAsFixed(2),
+                        unit: 'm',
+                        icon: Icons.date_range,
+                        color: Colors.purple,
                       ),
-                      _buildStatusCard(
-                        'Machine Status',
-                        data?.isRunning == true ? 'ACTIVE' : 'IDLE',
-                        '',
-                        data?.isRunning == true ? Icons.play_circle : Icons.pause_circle,
-                        data?.isRunning == true ? Colors.green : Colors.orange,
+                      _StatusCard(
+                        title: 'Machine Status',
+                        value: data?.isRunning == true ? 'ACTIVE' : 'IDLE',
+                        unit: '',
+                        icon: data?.isRunning == true ? Icons.play_circle : Icons.pause_circle,
+                        color: data?.isRunning == true ? Colors.green : Colors.orange,
                       ),
                     ],
                   );
@@ -323,7 +457,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
           const SizedBox(height: 32),
 
-          // Quick Actions Section
+          // Quick Actions section
           Text(
             'Quick Actions',
             style: TextStyle(
@@ -334,30 +468,46 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
           ),
           const SizedBox(height: 16),
 
-          // Action Buttons
           Row(
             children: [
               Expanded(
-                child: _buildActionButton(
-                  'Device Setup',
-                  Icons.settings,
-                  Colors.blue,
-                      () {
+                child: ElevatedButton.icon(
+                  onPressed: () {
                     Navigator.push(
                       context,
                       MaterialPageRoute(builder: (context) => const BluetoothScanScreen()),
                     );
                   },
+                  icon: const Icon(Icons.settings),
+                  label: const Text('Device Setup'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    elevation: 4,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    minimumSize: const Size.fromHeight(56),
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
               Expanded(
-                child: _buildActionButton(
-                  'Export Data',
-                  Icons.download,
-                  Colors.green,
-                  exporting ? null : exportCsv,
-                  isLoading: exporting,
+                child: ElevatedButton.icon(
+                  onPressed: exporting ? null : exportExcel,
+                  icon: exporting
+                      ? const SizedBox(
+                    height: 20,
+                    width: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  )
+                      : const Icon(Icons.file_download),
+                  label: Text(exporting ? 'Exporting...' : 'Export Excel'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    elevation: 4,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    minimumSize: const Size.fromHeight(56),
+                  ),
                 ),
               ),
             ],
@@ -365,494 +515,222 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
 
           const SizedBox(height: 24),
 
-          // Recent Cutting Activity Card (from cutting logs instead of machine history)
-          _buildRecentCuttingActivityCard(),
+          // Recent Cutting Activity Card
+          _RecentCutsCard(),
         ],
       ),
     );
   }
+}
 
-  Widget _buildStatusCard(String title, String value, String unit, IconData icon, Color color) {
+class _StatusCard extends StatelessWidget {
+  final String title;
+  final String value;
+  final String unit;
+  final IconData icon;
+  final Color color;
+
+  const _StatusCard({
+    Key? key,
+    required this.title,
+    required this.value,
+    required this.unit,
+    required this.icon,
+    required this.color,
+  }) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            spreadRadius: 0,
-            blurRadius: 10,
-            offset: const Offset(0, 2),
+          BoxShadow(color: Colors.grey.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 4)),
+        ],
+      ),
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+            child: Icon(icon, color: color, size: 20),
+          ),
+          const SizedBox(height: 12),
+          Text(title, style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500)),
+          const SizedBox(height: 4),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Flexible(
+                child: Text(value,
+                    style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87),
+                    overflow: TextOverflow.ellipsis),
+              ),
+              if (unit.isNotEmpty) ...[
+                const SizedBox(width: 2),
+                Text(unit, style: TextStyle(fontSize: 12, color: Colors.grey[600], fontWeight: FontWeight.w500)),
+              ],
+            ],
           ),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    );
+  }
+}
+
+class _RecentCutsCard extends StatelessWidget {
+  const _RecentCutsCard({Key? key}) : super(key: key);
+
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: BoxDecoration(
+          color: Colors.white, borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: Colors.grey.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 4))]),
+      padding: const EdgeInsets.all(20),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Row(
           children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: color.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(icon, color: color, size: 20),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Text(
-              title,
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey[600],
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Flexible(
-                  child: Text(
-                    value,
-                    style: const TextStyle(
-                      fontSize: 20,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                if (unit.isNotEmpty) ...[
-                  const SizedBox(width: 2),
-                  Text(
-                    unit,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey[600],
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ],
-            ),
+            Icon(Icons.content_cut, color: Colors.grey[600], size: 20),
+            const SizedBox(width: 8),
+            Text('Recent Cuts', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.grey[800])),
           ],
         ),
-      ),
-    );
-  }
-
-  Widget _buildActionButton(String text, IconData icon, Color color, VoidCallback? onPressed, {bool isLoading = false}) {
-    return Container(
-      height: 56,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: color.withOpacity(0.2),
-            spreadRadius: 0,
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: ElevatedButton.icon(
-        onPressed: onPressed,
-        icon: isLoading
-            ? SizedBox(
-          height: 20,
-          width: 20,
-          child: CircularProgressIndicator(
-            strokeWidth: 2,
-            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-          ),
-        )
-            : Icon(icon, size: 20),
-        label: Text(
-          isLoading ? 'Loading...' : text,
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: color,
-          foregroundColor: Colors.white,
-          elevation: 0,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildRecentCuttingActivityCard() {
-    return Container(
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
-            spreadRadius: 0,
-            blurRadius: 10,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Icon(Icons.content_cut, color: Colors.grey[600], size: 20),
-                const SizedBox(width: 8),
-                Text(
-                  'Recent Cuts',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Colors.grey[800],
+        const SizedBox(height: 16),
+        StreamBuilder<QuerySnapshot>(
+          stream: FirebaseFirestore.instance.collection('cuttingLogs').orderBy('timestamp', descending: true).limit(3).snapshots(),
+          builder: (context, snapshot) {
+            if (snapshot.connectionState == ConnectionState.waiting) {
+              return const Center(child: Padding(padding: EdgeInsets.all(20), child: CircularProgressIndicator()));
+            }
+            if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                  child: Column(
+                    children: [
+                      Icon(Icons.inbox_outlined, size: 48, color: Colors.grey[400]),
+                      const SizedBox(height: 8),
+                      Text('No recent cuts', style: TextStyle(color: Colors.grey[600])),
+                    ],
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            StreamBuilder<QuerySnapshot>(
-              stream: FirebaseFirestore.instance
-                  .collection('cuttingLogs')
-                  .orderBy('timestamp', descending: true)
-                  .limit(3)
-                  .snapshots(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(
-                    child: Padding(
-                      padding: EdgeInsets.all(20),
-                      child: CircularProgressIndicator(),
-                    ),
-                  );
-                }
+              );
+            }
+            final docs = snapshot.data!.docs;
+            return Column(
+              children: docs.map((doc) {
+                final cut = doc.data() as Map<String, dynamic>;
+                final actualLength = (cut['actualLength'] as num?)?.toDouble() ?? 0;
+                final targetLength = (cut['targetLength'] as num?)?.toDouble() ?? 0;
+                final accuracy = (cut['accuracy'] as num?)?.toDouble() ?? 0;
+                final formattedTimeRaw = cut['formattedTime'] as String? ?? '';
 
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Column(
-                        children: [
-                          Icon(Icons.inbox_outlined, size: 48, color: Colors.grey[400]),
-                          const SizedBox(height: 8),
-                          Text(
-                            'No recent cuts',
-                            style: TextStyle(color: Colors.grey[600]),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }
+                // Parse and reformat to DD-MM-YY HH:MM
+                String timeStr = 'Unknown time';
+                if (formattedTimeRaw.isNotEmpty) {
+                  try {
+                    final parts = formattedTimeRaw.split(' ');
+                    if (parts.length >= 2) {
+                      final datePart = parts[0];
+                      final timePart = parts[1];
 
-                final recentDocs = snapshot.data!.docs;
+                      final dateComponents = datePart.split('-');
+                      final timeComponents = timePart.split(':');
 
-                return Column(
-                  children: recentDocs.map((doc) {
-                    final cutData = doc.data() as Map<String, dynamic>;
-                    final actualLength = (cutData['actualLength'] as num?)?.toDouble() ?? 0;
-                    final targetLength = (cutData['targetLength'] as num?)?.toDouble() ?? 0;
-                    final accuracy = (cutData['accuracy'] as num?)?.toDouble() ?? 0;
-                    final timestamp = cutData['timestamp'] as Timestamp?;
-
-                    // Format timestamp
-                    String timeStr = 'Unknown time';
-                    if (timestamp != null) {
-                      final dateTime = timestamp.toDate();
-                      final now = DateTime.now();
-                      final difference = now.difference(dateTime);
-
-                      if (difference.inMinutes < 1) {
-                        timeStr = 'Just now';
-                      } else if (difference.inHours < 1) {
-                        timeStr = '${difference.inMinutes}m ago';
-                      } else if (difference.inDays < 1) {
-                        timeStr = '${difference.inHours}h ago';
-                      } else {
-                        timeStr = '${difference.inDays}d ago';
+                      if (dateComponents.length == 3 && timeComponents.length >= 2) {
+                        final year = dateComponents[0].substring(2);
+                        final month = dateComponents[1];
+                        final day = dateComponents[2];
+                        final hour = timeComponents[0];
+                        final minute = timeComponents[1];
+                        timeStr = '$day-$month-$year $hour:$minute';
                       }
                     }
+                  } catch (e) {
+                    timeStr = formattedTimeRaw;
+                  }
+                }
 
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: Row(
-                        children: [
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: accuracy >= 95 ? Colors.green :
-                              accuracy >= 90 ? Colors.orange : Colors.red,
-                              shape: BoxShape.circle,
+                Color accuracyColor = accuracy >= 95
+                    ? Colors.green
+                    : accuracy >= 90
+                    ? Colors.orange
+                    : Colors.red;
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    children: [
+                      Container(width: 8, height: 8, decoration: BoxDecoration(color: accuracyColor, shape: BoxShape.circle)),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Length: ${targetLength.toStringAsFixed(2)}m',
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w500,
+                                fontSize: 14,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
+                            const SizedBox(height: 4),
+                            Row(
                               children: [
+                                Icon(Icons.calendar_today, size: 10, color: Colors.grey[500]),
+                                const SizedBox(width: 4),
                                 Text(
-                                  'Length:   ${targetLength.toStringAsFixed(2)}m',
-                                  style: const TextStyle(
-                                    fontWeight: FontWeight.w500,
-                                    fontSize: 14,
+                                  timeStr.split(' ')[0], // Show only date: "02-10-25"
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: Colors.grey[600],
                                   ),
                                 ),
+                                const SizedBox(width: 8),
+                                Icon(Icons.access_time, size: 10, color: Colors.grey[500]),
+                                const SizedBox(width: 4),
                                 Text(
-                                  timeStr,
+                                  timeStr.split(' ').length > 1 ? timeStr.split(' ')[1] : '', // Show time: "15:01"
                                   style: TextStyle(
-                                    fontSize: 12,
+                                    fontSize: 11,
                                     color: Colors.grey[600],
                                   ),
                                 ),
                               ],
                             ),
-                          ),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: accuracy >= 95 ? Colors.green.withOpacity(0.1) :
-                              accuracy >= 90 ? Colors.orange.withOpacity(0.1) :
-                              Colors.red.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(12),
-                            ),
-                            child: Text(
-                              '${accuracy.toStringAsFixed(1)}%',
-                              style: TextStyle(
-                                color: accuracy >= 95 ? Colors.green :
-                                accuracy >= 90 ? Colors.orange : Colors.red,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                );
-              },
-            ),
-            const SizedBox(height: 8),
-            GestureDetector(
-              onTap: () => _tabController.animateTo(1),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    'View All Cuts',
-                    style: TextStyle(
-                      color: Colors.blue[600],
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                    ),
-                  ),
-                  const SizedBox(width: 4),
-                  Icon(
-                    Icons.arrow_forward_ios,
-                    size: 12,
-                    color: Colors.blue[600],
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildHistoryTab() {
-    return Container(
-      color: Colors.grey[50],
-      child: Column(
-        children: [
-          Container(
-            color: Colors.white,
-            padding: const EdgeInsets.all(20),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Machine History',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.grey[800],
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Complete activity log',
-                        style: TextStyle(
-                          fontSize: 14,
-                          color: Colors.grey[600],
-                        ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(color: accuracyColor.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                        child: Text('${accuracy.toStringAsFixed(1)}%', style: TextStyle(color: accuracyColor, fontSize: 10, fontWeight: FontWeight.w600)),
                       ),
                     ],
                   ),
-                ),
-                _buildActionButton(
-                  'Export',
-                  Icons.download,
-                  Colors.green,
-                  exporting ? null : exportCsv,
-                  isLoading: exporting,
-                ),
-              ],
-            ),
-          ),
-          Expanded(
-            child: StreamBuilder<QuerySnapshot>(
-              stream: historyStream(),
-              builder: (context, snapshot) {
-                if (snapshot.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
-                }
-
-                if (snapshot.hasError) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.error_outline, size: 48, color: Colors.red[300]),
-                        const SizedBox(height: 16),
-                        Text(
-                          'Error loading history',
-                          style: TextStyle(fontSize: 16, color: Colors.grey[600]),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '${snapshot.error}',
-                          style: TextStyle(fontSize: 12, color: Colors.grey[500]),
-                          textAlign: TextAlign.center,
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
-                  return Center(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                        Icon(Icons.inbox_outlined, size: 64, color: Colors.grey[400]),
-                        const SizedBox(height: 16),
-                        Text(
-                          'No history data available',
-                          style: TextStyle(fontSize: 16, color: Colors.grey[600]),
-                        ),
-                      ],
-                    ),
-                  );
-                }
-
-                final docs = snapshot.data!.docs;
-                return ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: docs.length,
-                  itemBuilder: (context, index) {
-                    final m = docs[index].data() as Map<String, dynamic>;
-                    final timestamp = m['timestamp'] ?? '';
-                    final currentLength = m['currentLength']?.toString() ?? '0';
-                    final isRunning = m['isRunning'] ?? false;
-                    final totalToday = ((m['totalToday'] ?? 0) / 1000).toStringAsFixed(2);
-                    final lifetime = ((m['lifetime'] ?? 0) / 1000).toStringAsFixed(1);
-
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.grey.withOpacity(0.1),
-                            spreadRadius: 0,
-                            blurRadius: 8,
-                            offset: const Offset(0, 2),
-                          ),
-                        ],
-                      ),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.all(16),
-                        leading: Container(
-                          width: 12,
-                          height: 12,
-                          decoration: BoxDecoration(
-                            color: isRunning ? Colors.green : Colors.orange,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        title: Text(
-                          'Current: ${currentLength}mm',
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w600,
-                            fontSize: 16,
-                          ),
-                        ),
-                        subtitle: Padding(
-                          padding: const EdgeInsets.only(top: 8),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                timestamp,
-                                style: TextStyle(
-                                  color: Colors.grey[600],
-                                  fontSize: 13,
-                                ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                'Today: ${totalToday}m • Lifetime: ${lifetime}m',
-                                style: TextStyle(
-                                  color: Colors.grey[700],
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        trailing: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          decoration: BoxDecoration(
-                            color: isRunning ? Colors.green.withOpacity(0.1) : Colors.orange.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          child: Text(
-                            isRunning ? 'RUNNING' : 'IDLE',
-                            style: TextStyle(
-                              color: isRunning ? Colors.green : Colors.orange,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
                 );
-              },
-            ),
-          ),
-        ],
-      ),
+              }).toList(),
+            );
+          },
+        ),
+        const SizedBox(height: 8),
+        GestureDetector(
+          onTap: () {
+            // Switch to Sales History tab on tap
+            final tabController = DefaultTabController.of(context);
+            tabController?.animateTo(1);
+          },
+          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+            Text('View All Cuts', style: TextStyle(color: Colors.blue[600], fontWeight: FontWeight.w600, fontSize: 14)),
+            const SizedBox(width: 4),
+            Icon(Icons.arrow_forward_ios, size: 12, color: Colors.blue[600]),
+          ]),
+        ),
+      ]),
     );
   }
 }

@@ -309,7 +309,7 @@ class _BluetoothScanScreenState extends State<BluetoothScanScreen>
                             ),
                             const SizedBox(height: 8),
                             const Text(
-                              'First, we need to connect to your ESP32 device via Bluetooth. Make sure your device is in pairing mode.',
+                              'First, we need to connect to your  Device via Bluetooth. Make sure your device is in pairing mode.',
                               style: TextStyle(
                                 fontSize: 14,
                                 color: Colors.grey,
@@ -360,7 +360,7 @@ class _BluetoothScanScreenState extends State<BluetoothScanScreen>
                             ),
                             const SizedBox(height: 8),
                             const Text(
-                              'Scan for nearby ESP32 devices',
+                              'Scan for nearby  devices',
                               style: TextStyle(
                                 fontSize: 14,
                                 color: Colors.grey,
