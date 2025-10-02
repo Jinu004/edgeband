@@ -718,18 +718,7 @@ class _RecentCutsCard extends StatelessWidget {
           },
         ),
         const SizedBox(height: 8),
-        GestureDetector(
-          onTap: () {
-            // Switch to Sales History tab on tap
-            final tabController = DefaultTabController.of(context);
-            tabController?.animateTo(1);
-          },
-          child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            Text('View All Cuts', style: TextStyle(color: Colors.blue[600], fontWeight: FontWeight.w600, fontSize: 14)),
-            const SizedBox(width: 4),
-            Icon(Icons.arrow_forward_ios, size: 12, color: Colors.blue[600]),
-          ]),
-        ),
+
       ]),
     );
   }
