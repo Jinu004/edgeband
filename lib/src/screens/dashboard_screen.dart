@@ -12,6 +12,8 @@ import '../providers/machine_provider.dart';
 import '../models/machine_data.dart';
 import 'device_setup_screen.dart';
 
+import 'package:jv/src/services/app_updater.dart';
+
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
   @override
@@ -26,6 +28,7 @@ class _DashboardScreenState extends State<DashboardScreen> with SingleTickerProv
   @override
   void initState() {
     super.initState();
+    UpdateChecker.checkAndPromptUpdate(context, silent: true);
     _tabController = TabController(length: 2, vsync: this);
     final machineProv = Provider.of<MachineProvider>(context, listen: false);
     // Watch machine data updates
